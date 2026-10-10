@@ -1,87 +1,76 @@
-# EchoPath Acoustic Radar (Workspace)
+# EchoPath 🦇
 
-Welcome to the EchoPath workspace! This directory contains the complete source code for the EchoPath Android application.
+Hey there! Welcome to EchoPath.
 
-## 📂 Project Structure
+We built EchoPath to solve a really tricky problem: how do you give people (especially the visually impaired) a reliable way to sense obstacles around them using *only* the hardware they already have in their pockets?
 
-This workspace contains the merged codebase of the UI and the Digital Signal Processing (DSP) Engine.
+Our answer? **Acoustic Radar (Sonar)**. 
 
-*   **[`EchoPathUI/`](./EchoPathUI)** - **Main Android Application (Use This!)**
-    *   This folder contains the fully integrated, production-ready Android Studio project. It combines your custom Jetpack Compose UI with the high-frequency Acoustic Radar Engine. 
-    *   **To run the app:** Open the `EchoPathUI` folder directly in Android Studio and hit Run.
-*   **[`app/`](./app)** - *Legacy/Standalone Engine (Depreciated)*
-    *   This folder contains the original, headless Kotlin engine we built before integrating it with your UI. You can ignore this folder, as all the logic has been successfully merged into `EchoPathUI`.
+EchoPath turns any standard Android smartphone into an active sonar device. It works entirely offline, processes everything on the edge, and doesn't require any extra hardware, lidar, or internet connection.
 
----
+## How it Actually Works
 
-## 🛠️ Complete Tech Stack
+The concept is surprisingly simple, but the math gets a bit wild:
+1. The app blasts a high-frequency continuous sine wave (18.5kHz) out of the phone's loudspeaker. You can barely hear it, if at all.
+2. The phone's microphone records the environment while this sound is playing.
+3. When the sound waves hit an object (like a wall, a person, or a parked car), they bounce back and hit the microphone. 
+4. We run a custom Fast Fourier Transform (FFT) on the raw audio to isolate the echoes.
+5. If the echoes cross our dynamic baseline, the phone instantly triggers haptic feedback (vibrations) and audio warnings.
 
-### Core Application
-- **Language:** Kotlin
-- **Platform:** Native Android (Min SDK: 26, Target SDK: 35)
-- **UI Toolkit:** Jetpack Compose (Material 3)
-- **State Management:** Compose `State<T>`, `LaunchedEffect`
-
-### DSP & Acoustic Engine
-- **Audio Capture:** `AudioRecord` (Raw PCM 16-bit, `UNPROCESSED` source to bypass OS noise cancellation)
-- **Audio Emission:** `AudioTrack` (18.5kHz continuous carrier sine wave)
-- **Mathematics:** Custom Cooley-Tukey Fast Fourier Transform (FFT) algorithm for real-time frequency domain conversion.
-
-### Edge ML & AI
-- **Framework:** TensorFlow Lite (`org.tensorflow:tensorflow-lite:2.14.0`)
-- **Current Model:** Heuristic Sideband Dispersion Classifier (Placeholder for 1D-CNN)
-
-### Hardware Actuation
-- **Haptics:** Android `Vibrator` & `VibratorManager` (Dynamic waveform pulsing)
-- **Alerts:** `ToneGenerator` (Low-latency hardware beeps: `TONE_CDMA_URGENT`, `TONE_PROP_BEEP`)
-- **Voice:** `TextToSpeech` (TTS) Engine
+### The Brains: Edge AI
+We aren't just looking at volume; we actually pipe the FFT data into a local **TensorFlow Lite** model running right on the phone. By looking at the signature of the sound bounce, the AI can classify whether you're approaching a "Hard Surface" (like a glass door) or a "Soft Object" (like a person). Because it runs on the Edge, latency is practically zero—which is critical when you're walking.
 
 ---
 
-## 🔄 System Flowchart
+## What's under the hood? (Tech Stack)
 
-Here is the exact runtime data flow showing how the UI, sensors, math, and AI all interact in real-time.
+I tried to keep dependencies minimal. Most of this relies on raw math and native Android APIs.
+
+- **Language:** Kotlin (100%)
+- **UI:** Jetpack Compose (Modern, reactive, clean)
+- **Audio I/O:** `AudioRecord` (using `UNPROCESSED` source to bypass the OS noise cancellation) and `AudioTrack`
+- **Signal Processing:** A custom Cooley-Tukey FFT implementation written from scratch so we don't need heavy C++ math libraries.
+- **AI Inference:** TensorFlow Lite Android SDK
+- **Actuation:** `VibratorManager` & `ToneGenerator` for instant, zero-lag physical feedback.
+
+---
+
+## Architecture Breakdown
+
+Here's a quick look at the data flow inside the Engine:
 
 ```mermaid
-graph TD
-    %% UI Layer
-    subgraph UI["Jetpack Compose UI (MainActivity)"]
-        A[User Taps Power Button] -->|State: isOn = true| B(Start Engine)
-        UpdateUI[Update Screen Text & Glow]
+flowchart LR
+    subgraph Environment
+        SoundWave[18.5kHz Sound] --> Obstacle
+        Obstacle --> Echo[Sonar Echo]
     end
 
-    %% Hardware I/O Layer
-    subgraph Hardware["Hardware I/O"]
-        Mic[Microphone]
-        Spk[Loudspeaker]
-        Vib[Vibration Motor]
-        Tone[Tone Generator]
+    subgraph Phone [Android Device]
+        Speaker((Speaker))
+        Mic((Microphone))
+        
+        Speaker -. emits .-> SoundWave
+        Echo -. captured by .-> Mic
+        
+        Mic -->|Raw PCM| FFT[FFT Math Engine]
+        FFT -->|Frequency Bars| TFLite[TensorFlow Lite AI]
+        
+        TFLite -->|Hard/Soft/Clear| Logic{Hazard Logic}
+        
+        Logic -->|Danger!| Haptics((Vibration Motor))
+        Logic -->|UI Update| Compose[Jetpack Compose UI]
     end
-
-    %% Engine Layer
-    subgraph Engine["AcousticRadarEngine"]
-        B -->|Spawns| Emitter[Emitter Thread]
-        B -->|Spawns| Listener[Listener Thread]
-        
-        Emitter -->|18.5kHz Sine Wave| Spk
-        Mic -->|Raw PCM 44.1kHz| Listener
-        
-        Listener -->|2048 Sample Chunks| Hanning[Apply Hanning Window]
-        Hanning --> FFT[Cooley-Tukey FFT]
-        FFT -->|Frequency Magnitudes| Doppler[Extract High-Frequency Sidebands]
-        
-        Doppler -->|Sideband Energy| EMA[Calculate Dynamic Baseline EMA]
-        EMA -->|Energy vs Baseline| TierCalc{Calculate Tier}
-        
-        TierCalc -->|Delta Score| Classifier[TFLite / Edge AI Classifier]
-        Classifier -->|Hard / Soft Object| Telemetry[Build RadarTelemetry]
-        
-        Telemetry -->|Trigger| Actuation{Hardware Actuation}
-    end
-
-    %% Connections
-    Actuation -->|Critical/Warning| Vib
-    Actuation -->|Critical/Warning| Tone
-    
-    Telemetry -->|Push via Listener Callback| UpdateUI
 ```
+
+## Getting Started
+
+If you want to build and run this yourself:
+1. Open the **`EchoPathUI`** folder in Android Studio. (Note: ignore the root `app` folder, `EchoPathUI` contains the fully integrated app).
+2. Connect your Android phone via USB.
+3. Hit **Run**. 
+
+*Note: You must grant Microphone permissions when the app opens, otherwise it can't listen for the echoes!*
+
+---
+*Built with coffee, math, and Kotlin.*
