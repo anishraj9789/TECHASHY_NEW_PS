@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -246,11 +247,12 @@ fun HomeScreen(isOn: Boolean, telemetry: RadarTelemetry?, onToggle: () -> Unit) 
         Text(
             text = if (isOn) {
                 telemetry?.let {
-                    "Status: ${it.tier} | Delta: ${String.format(Locale.US, "%.1f", it.delta)}"
+                    "Status: ${it.tier}\nDelta: ${String.format(Locale.US, "%.1f", it.delta)}\nDetected: ${it.obstacleType}"
                 } ?: "Scanning surroundings..."
             } else "Tap to start",
             color = SkyBlue,
-            fontSize = 18.sp
+            fontSize = 18.sp,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
         )
         Spacer(Modifier.height(48.dp))
     }

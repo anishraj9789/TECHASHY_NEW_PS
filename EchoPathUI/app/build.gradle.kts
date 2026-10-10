@@ -7,6 +7,7 @@ plugins {
 android {
     namespace = "com.example.echopath"
     compileSdk = 35
+    buildToolsVersion = "34.0.0"
 
     defaultConfig {
         applicationId = "com.example.echopath"
@@ -20,6 +21,10 @@ android {
         release {
             isMinifyEnabled = false
         }
+    }
+    
+    androidResources {
+        noCompress("tflite")
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -44,4 +49,7 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
+    
+    // TensorFlow Lite for Edge AI Obstacle Classification
+    implementation("org.tensorflow:tensorflow-lite:2.14.0")
 }

@@ -12,6 +12,11 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.util.Log
+import org.tensorflow.lite.Interpreter
+import java.io.FileInputStream
+import java.nio.MappedByteBuffer
+import java.nio.channels.FileChannel
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.sin
@@ -21,12 +26,13 @@ data class RadarTelemetry(
     val isRunning: Boolean,
     val isSimulated: Boolean,
     val carrierFreq: Int,
-    val tier: String, // "CLEAR", "CAUTION", "CRITICAL"
+    val tier: String,
     val delta: Double,
     val baseline: Double,
     val carrierPower: Double,
     val sidebandEnergy: Double,
-    val estimatedDistanceMeters: Double
+    val estimatedDistanceMeters: Double,
+    val obstacleType: String = "Unknown"
 )
 
 interface RadarUpdateListener {
@@ -72,6 +78,26 @@ class AcousticRadarEngine(private val context: Context) {
     
     private var lastTier1Time = 0L
     private var lastTier2Time = 0L
+    
+    private var tflite: Interpreter? = null
+
+    init {
+        try {
+            tflite = Interpreter(loadModelFile("radar_model.tflite"))
+            Log.d("AcousticRadar", "Successfully loaded Edge AI model")
+        } catch (e: Exception) {
+            Log.w("AcousticRadar", "Edge AI model not found, using heuristic fallback.", e)
+        }
+    }
+
+    private fun loadModelFile(modelName: String): MappedByteBuffer {
+        val fileDescriptor = context.assets.openFd(modelName)
+        val inputStream = FileInputStream(fileDescriptor.fileDescriptor)
+        val fileChannel = inputStream.channel
+        val startOffset = fileDescriptor.startOffset
+        val declaredLength = fileDescriptor.declaredLength
+        return fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
+    }
 
     fun setUpdateListener(listener: RadarUpdateListener) {
         this.listener = listener
@@ -253,6 +279,7 @@ class AcousticRadarEngine(private val context: Context) {
     }
 
     private fun evaluateHazards() {
+        if (!isRunning) return
         val now = System.currentTimeMillis()
         
         if (delta >= sensitivityThreshold * 2.2) {
@@ -273,15 +300,37 @@ class AcousticRadarEngine(private val context: Context) {
             tier = "CLEAR"
         }
         
+        val type = if (tier != "CLEAR") {
+            if (tflite != null) {
+                // Use Edge AI Model (TensorFlow Lite) for classification
+                val input = arrayOf(floatArrayOf(sidebandEnergy.toFloat(), delta.toFloat()))
+                val output = arrayOf(floatArrayOf(0f, 0f, 0f))
+                try {
+                    tflite?.run(input, output)
+                    val p = output[0]
+                    when {
+                        p[1] > p[2] && p[1] > p[0] -> "Hard Surface"
+                        p[2] > p[1] && p[2] > p[0] -> "Soft Object"
+                        else -> "Unknown"
+                    }
+                } catch (e: Exception) {
+                    "Model Error"
+                }
+            } else {
+                // Fallback heuristic if no .tflite model is found
+                if (sidebandEnergy > baseline * 1.5) "Hard Surface" else "Soft Object"
+            }
+        } else "None"
+
         listener?.onRadarUpdate(
             RadarTelemetry(
-                isRunning, isSimulated, carrierFreq, tier, delta, baseline, carrierPower, sidebandEnergy, estimatedDistanceMeters
+                isRunning, isSimulated, carrierFreq, tier, delta, baseline, carrierPower, sidebandEnergy, estimatedDistanceMeters, type
             )
         )
     }
 
     private fun triggerHaptic(pattern: LongArray) {
-        if (!hapticsEnabled || !vibrator.hasVibrator()) return
+        if (!isRunning || !hapticsEnabled || !vibrator.hasVibrator()) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
         } else {
@@ -295,7 +344,7 @@ class AcousticRadarEngine(private val context: Context) {
     }
     
     private fun playUrgentTick() {
-        toneGenerator.startTone(ToneGenerator.TONE_CDMA_URGENT, 80)
+        toneGenerator.startTone(ToneGenerator.TONE_CDMA_EMERGENCY_RINGBACK, 80)
     }
 
     fun stop() {
@@ -308,6 +357,8 @@ class AcousticRadarEngine(private val context: Context) {
     
     private fun stopHardware() {
         try {
+            vibrator.cancel()
+            
             audioRecord?.stop()
             audioRecord?.release()
             audioRecord = null
