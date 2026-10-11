@@ -109,7 +109,7 @@ fun EchoPathApp(radarEngine: AcousticRadarEngine) {
 
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var isOn by rememberSaveable { mutableStateOf(true) }
-    var audioEnabled by remember { mutableStateOf(prefs(context).getBoolean("audio", true)) }
+    var audioEnabled by remember { mutableStateOf(prefs(context).getBoolean("audio", false)) }
     var hapticsEnabled by remember { mutableStateOf(prefs(context).getBoolean("haptics", true)) }
 
     var telemetry by remember { mutableStateOf<RadarTelemetry?>(null) }
@@ -119,29 +119,29 @@ fun EchoPathApp(radarEngine: AcousticRadarEngine) {
         radarEngine.hapticsEnabled = hapticsEnabled
     }
     
+    var hasPermission by remember { 
+        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) 
+    }
+
     DisposableEffect(Unit) {
         radarEngine.setUpdateListener(object : RadarUpdateListener {
             override fun onRadarUpdate(t: RadarTelemetry) {
                 telemetry = t
             }
         })
-        if (isOn) radarEngine.start()
+        if (isOn && hasPermission) radarEngine.start(soundEnabled = audioEnabled)
         onDispose { radarEngine.stop() }
     }
-
-    val tts = remember {
-        var engine: TextToSpeech? = null
-        engine = TextToSpeech(context) { status ->
-            if (status == TextToSpeech.SUCCESS) engine?.language = Locale.getDefault()
+    
+    // Check permission loop to start radar once user clicks Allow
+    LaunchedEffect(hasPermission) {
+        while (!hasPermission) {
+            kotlinx.coroutines.delay(500)
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                hasPermission = true
+                if (isOn) radarEngine.start()
+            }
         }
-        engine
-    }
-    DisposableEffect(Unit) {
-        onDispose { tts.stop(); tts.shutdown() }
-    }
-
-    fun speak(text: String) {
-        if (audioEnabled) tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "echopath")
     }
 
     Scaffold(
@@ -167,10 +167,8 @@ fun EchoPathApp(radarEngine: AcousticRadarEngine) {
                         isOn = !isOn
                         if (hapticsEnabled) vibrateOnce(context)
                         if (isOn) {
-                            speak("Scanning surroundings")
-                            radarEngine.start()
+                            radarEngine.start(soundEnabled = audioEnabled)
                         } else {
-                            speak("EchoPath off")
                             radarEngine.stop()
                         }
                     }
@@ -247,7 +245,7 @@ fun HomeScreen(isOn: Boolean, telemetry: RadarTelemetry?, onToggle: () -> Unit) 
         Text(
             text = if (isOn) {
                 telemetry?.let {
-                    "Status: ${it.tier}\nDelta: ${String.format(Locale.US, "%.1f", it.delta)}\nDetected: ${it.obstacleType}"
+                    "Status: ${it.tier}\nDetected: ${it.obstacleType}"
                 } ?: "Scanning surroundings..."
             } else "Tap to start",
             color = SkyBlue,
