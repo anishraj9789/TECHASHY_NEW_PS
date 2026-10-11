@@ -16,7 +16,7 @@
 
 ---
 
-## 🚀 The Big Idea
+## 🚀 Idea
 
 How do you give people, especially the **visually impaired**, a reliable way to sense obstacles around them using *only* a smartphone? No lidar. No extra gadgets. No internet.
 
